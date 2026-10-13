@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自動抽籤</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f2f5fa;color:#203047;font-family:system-ui,-apple-system,sans-serif}main{max-width:880px;margin:48px auto;padding:24px}h1{margin:0 0 8px;font-size:36px}.intro{color:#64748b;margin-bottom:28px}.card{background:white;padding:26px;border-radius:20px;box-shadow:0 8px 30px #2030470a;margin-bottom:20px}label{display:block;font-weight:600;margin-bottom:10px}textarea{width:100%;min-height:200px;resize:vertical;font:inherit;line-height:1.7;padding:14px;border:1px solid #cbd5e1;border-radius:12px}input[type=number]{width:90px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font:inherit}.controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:18px}.controls label{margin:0;display:flex;align-items:center;gap:8px;font-weight:400}button{font:inherit;border:0;border-radius:10px;padding:12px 20px;cursor:pointer;background:#2563eb;color:white;font-weight:600}button.secondary{background:#e9eef6;color:#334155}button:disabled{opacity:.5;cursor:wait}button:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid #93c5fd;outline-offset:3px}.actions{display:flex;gap:12px;margin-top:22px}.status{min-height:24px;color:#64748b;margin:16px 0 0}.error{color:#b91c1c}.winners{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.winner{padding:14px 20px;background:#eff6ff;color:#1d4ed8;border-radius:12px;font-size:24px;font-weight:700;overflow-wrap:anywhere;max-width:100%}h2{font-size:20px;margin:0}.empty{color:#94a3b8}ol{padding-left:24px;color:#64748b}li{padding:6px;overflow-wrap:anywhere}small{color:#64748b}@media(max-width:600px){main{margin:12px auto;padding:16px}.card{padding:20px}h1{font-size:30px}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>🎉 自動抽籤</h1>
+  <p class="intro">貼上名單，按一下就能隨機抽出幸運得主。可離線使用。</p>
+  <section class="card">
+    <label for="names">參加名單</label>
+    <textarea id="names" placeholder="每行一個名字，例如：&#10;小明&#10;小華&#10;小美"></textarea>
+    <small>每行一位，也支援逗號、頓號分隔；相同名字只計算一次。同名者請加上編號。</small>
+    <div class="controls">
+      <label for="count">每次抽出 <input id="count" type="number" min="1" step="1" value="1"> 位</label>
+      <label><input id="exclude" type="checkbox" checked> 排除已抽中的人</label>
+    </div>
+    <div class="actions"><button id="draw">開始抽籤</button><button id="reset" class="secondary">重新開始</button></div>
+    <p id="status" class="status" role="status" aria-live="polite">請先輸入參加名單。</p>
+  </section>
+  <section class="card" aria-live="polite">
+    <h2>本次抽籤結果</h2>
+    <div id="winners" class="winners"><p class="empty">等待抽籤…</p></div>
+    <h2>抽籤紀錄</h2><ol id="history"></ol>
+  </section>
+  <small>名單僅在此頁面使用，重新整理或關閉頁面即會清除。</small>
+</main>
+<script>
+  const names = document.getElementById('names');
+  const count = document.getElementById('count');
+  const exclude = document.getElementById('exclude');
+  const status = document.getElementById('status');
+  const winners = document.getElementById('winners');
+  const history = document.getElementById('history');
+  const drawn = new Set();
+  let round = 0;
+  function participants() {
+    return [...new Set(names.value.split(/[\n\r,，、]+/).map(s => s.trim()).filter(Boolean))];
+  }
+  function remaining() { return participants().filter(n => !exclude.checked || !drawn.has(n)); }
+  function updateStatus() {
+    status.classList.remove('error');
+    status.textContent = `名單共 ${participants().length} 位，目前可抽 ${remaining().length} 位。`;
+  }
+  function randomIndex(max) {
+    // 拒絕超出整數倍範圍的值，避免取餘數造成偏差。
+    const limit = Math.floor(4294967296 / max) * max;
+    const buffer = new Uint32Array(1);
+    do { crypto.getRandomValues(buffer); } while (buffer[0] >= limit);
+    return buffer[0] % max;
+  }
+  document.getElementById('draw').addEventListener('click', () => {
+    const pool = remaining();
+    const amount = Number(count.value);
+    let error = '';
+    if (!participants().length) error = '請先輸入參加名單。';
+    else if (!Number.isSafeInteger(amount) || amount < 1) error = '抽出人數必須是大於 0 的整數。';
+    else if (!pool.length) error = '所有人都已抽中，請按「重新開始」或取消排除已抽中的人。';
+    else if (amount > pool.length) error = `目前只有 ${pool.length} 位可抽，請減少抽出人數。`;
+    if (error) { status.textContent = error; status.classList.add('error'); return; }
+    const selected = [];
+    for (let i = 0; i < amount; i++) selected.push(pool.splice(randomIndex(pool.length), 1)[0]);
+    selected.forEach(n => drawn.add(n));
+    winners.replaceChildren(...selected.map(n => {
+      const el = document.createElement('span'); el.className = 'winner'; el.textContent = n; return el;
+    }));
+    const entry = document.createElement('li');
+    entry.textContent = `第 ${++round} 次：${selected.join('、')}`;
+    history.prepend(entry);
+    updateStatus();
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    drawn.clear(); round = 0; history.replaceChildren();
+    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '等待抽籤…';
+    winners.replaceChildren(empty); updateStatus();
+  });
+  names.addEventListener('input', updateStatus);
+  exclude.addEventListener('change', updateStatus);
+</script>
+</body>
+</html>
